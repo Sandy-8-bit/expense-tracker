@@ -29,7 +29,7 @@ export function buildReport(type: string, data: ReportData, filters: ReportFilte
   const receipts = data.allocations.filter(
     (a) => creditIds.has(a.transaction_id) && invoices.some((i) => i.id === a.invoice_id),
   );
-  const linkedExpenses = (id: unknown) => [
+  const linkedExpenses = (id: unknown): ReportRecord[] => [
     ...data.transactions
       .filter((t) => t.expense_invoice_id === id && new Decimal(String(t.amount)).lt(0))
       .map((t) => ({
@@ -39,8 +39,95 @@ export function buildReport(type: string, data: ReportData, filters: ReportFilte
       })),
     ...expenses.filter((e) => e.invoice_id === id),
   ];
+  const transactionsById = new Map(data.transactions.map((t) => [t.id, t]));
+  const invoicesById = new Map(invoices.map((i) => [i.id, i]));
+  const paymentDetails = data.allocations
+    .flatMap((allocation) => {
+      const transaction = transactionsById.get(allocation.transaction_id);
+      const invoice = invoicesById.get(allocation.invoice_id);
+      return transaction && invoice && new Decimal(String(transaction.amount)).gt(0)
+        ? [{ allocation, transaction, invoice }]
+        : [];
+    })
+    .sort((a, b) => String(a.transaction.txn_date).localeCompare(String(b.transaction.txn_date)));
+  const paymentHeaders = [
+    'Invoice number',
+    'Company',
+    'Payment date',
+    'Allocated amount (INR)',
+    'Payment details',
+  ];
+  const paymentRows = paymentDetails
+    .filter(({ invoice }) => {
+      const linked = linkedExpenses(invoice.id);
+      if (type === 'expense')
+        return linked.some(
+          (e) =>
+            period(e.txn_date ?? e.expense_date) &&
+            (!filters.category || e.category_id === filters.category),
+        );
+      if (type === 'company') return true;
+      return (
+        (period(invoice.invoice_date) || receipts.some((a) => a.invoice_id === invoice.id)) &&
+        (!filters.category || linked.some((e) => e.category_id === filters.category))
+      );
+    })
+    .map(({ invoice, transaction, allocation }) => [
+      String(invoice.number),
+      company(invoice.company_id),
+      String(transaction.txn_date),
+      new Decimal(String(allocation.amount)).toFixed(2),
+      String(transaction.description ?? ''),
+    ]);
+  const paymentHistory = {
+    headers: paymentHeaders,
+    rows: paymentRows,
+    notes:
+      'All linked payment dates for the invoices included in this report. Each payment is listed separately; these amounts are detail only and are not added to report totals.',
+  };
+  const includedInvoices = invoices.filter(
+    (i) =>
+      (period(i.invoice_date) || receipts.some((a) => a.invoice_id === i.id)) &&
+      (!filters.category || linkedExpenses(i.id).some((e) => e.category_id === filters.category)),
+  );
+  if (type === 'payment')
+    return {
+      rowInvoiceIds: paymentDetails
+        .filter(
+          ({ transaction, invoice }) =>
+            period(transaction.txn_date) &&
+            (!filters.category ||
+              linkedExpenses(invoice.id).some((e) => e.category_id === filters.category)),
+        )
+        .map(({ invoice }) => [String(invoice.id)]),
+      headers: [
+        'Payment date',
+        'Invoice number',
+        'Company',
+        'Payment details',
+        'Allocated amount (INR)',
+      ],
+      rows: paymentDetails
+        .filter(
+          ({ transaction, invoice }) =>
+            period(transaction.txn_date) &&
+            (!filters.category ||
+              linkedExpenses(invoice.id).some((e) => e.category_id === filters.category)),
+        )
+        .map(({ allocation, transaction, invoice }) => [
+          String(transaction.txn_date),
+          String(invoice.number),
+          company(invoice.company_id),
+          String(transaction.description ?? ''),
+          new Decimal(String(allocation.amount)).toFixed(2),
+        ]),
+      notes:
+        'One row per payment linked to an invoice, filtered by bank payment date. Amounts show only the portion allocated to that invoice. The expense category filter selects invoices with matching expenses.',
+    };
   if (type === 'invoice')
     return {
+      rowInvoiceIds: includedInvoices.map((invoice) => [String(invoice.id)]),
+      paymentHistory,
       headers: [
         'Invoice',
         'Company',
@@ -59,52 +146,57 @@ export function buildReport(type: string, data: ReportData, filters: ReportFilte
         'Net cash (all dates)',
         'Status',
         'Expenses by category',
+        'Payment details (all dates)',
       ],
-      rows: invoices
-        .filter(
-          (i) =>
-            (period(i.invoice_date) || receipts.some((a) => a.invoice_id === i.id)) &&
-            (!filters.category ||
-              linkedExpenses(i.id).some((e) => e.category_id === filters.category)),
-        )
-        .map((i) =>
-          [
-            i.number,
-            company(i.company_id),
-            i.invoice_date,
-            ...[
-              'taxable_value',
-              'cgst',
-              'sgst',
-              'igst',
-              'additions',
-              'deductions',
-              'tds',
-              'net',
-              'receipts',
-              'outstanding',
-              'expenses',
-              'cash_remaining',
-              'status',
-            ].map((f) => i[f]),
-            ...[
-              [...new Set(linkedExpenses(i.id).map((e) => e.category_id))]
-                .map(
-                  (c) =>
-                    `${category(c)}: ${sum(
-                      linkedExpenses(i.id).filter((e) => e.category_id === c),
-                      'amount',
-                    ).toFixed(2)}`,
-                )
-                .join(' | '),
-            ],
-          ].map(String),
-        ),
+      rows: includedInvoices.map((i) =>
+        [
+          i.number,
+          company(i.company_id),
+          i.invoice_date,
+          ...[
+            'taxable_value',
+            'cgst',
+            'sgst',
+            'igst',
+            'additions',
+            'deductions',
+            'tds',
+            'net',
+            'receipts',
+            'outstanding',
+            'expenses',
+            'cash_remaining',
+            'status',
+          ].map((f) => i[f]),
+          ...[
+            [...new Set(linkedExpenses(i.id).map((e) => e.category_id))]
+              .map(
+                (c) =>
+                  `${category(c)}: ${sum(
+                    linkedExpenses(i.id).filter((e) => e.category_id === c),
+                    'amount',
+                  ).toFixed(2)}`,
+              )
+              .join(' | '),
+          ],
+          paymentDetails
+            .filter(({ invoice }) => invoice.id === i.id)
+            .map(
+              ({ allocation, transaction }) =>
+                `${transaction.txn_date}: INR ${new Decimal(String(allocation.amount)).toFixed(2)}${transaction.description ? ` (${transaction.description})` : ''}`,
+            )
+            .join(' | ') || 'No linked payments',
+        ].map(String),
+      ),
       notes:
-        'Invoices issued or receiving payments in the period. Receipt, outstanding and expense columns are cumulative.',
+        'Invoices issued or receiving payments in the period. Receipt, outstanding and expense columns are cumulative. Payment details list each linked payment by bank payment date across all dates.',
     };
   if (type === 'company')
     return {
+      rowInvoiceIds: data.companies
+        .filter((c) => !filters.company || c.id === filters.company)
+        .map((c) => invoices.filter((i) => i.company_id === c.id).map((i) => String(i.id))),
+      paymentHistory,
       headers: [
         'Company',
         'Invoices issued',
@@ -148,6 +240,22 @@ export function buildReport(type: string, data: ReportData, filters: ReportFilte
   );
   if (type === 'expense')
     return {
+      rowInvoiceIds: [
+        ...data.categories.filter((c) => c.type === 'expense'),
+        { id: null, name: 'Unclassified' },
+      ]
+        .filter((c) => !filters.category || c.id === filters.category)
+        .map((c) =>
+          invoices
+            .filter(
+              (i) =>
+                expenseDebits.some(
+                  (e) => e.expense_invoice_id === i.id && e.expense_category_id === c.id,
+                ) || manual.some((e) => e.invoice_id === i.id && e.category_id === c.id),
+            )
+            .map((i) => String(i.id)),
+        ),
+      paymentHistory,
       headers: ['Expense category', 'Bank expenses', 'Manual expenses', 'Total'],
       rows: [
         ...data.categories.filter((c) => c.type === 'expense'),
@@ -203,6 +311,16 @@ export function buildReport(type: string, data: ReportData, filters: ReportFilte
     ['Outstanding invoices (all dates)', sum(invoices, 'outstanding')],
   ];
   return {
+    rowInvoiceIds: metrics.map(([name]) =>
+      name === 'Invoice receipts linked'
+        ? [...new Set(receipts.map((a) => String(a.invoice_id)))]
+        : name === 'Outstanding invoices (all dates)'
+          ? invoices
+              .filter((i) => new Decimal(String(i.outstanding ?? 0)).gt(0))
+              .map((i) => String(i.id))
+          : [],
+    ),
+    paymentHistory,
     headers: ['Metric', 'Amount (INR)'],
     rows: metrics.map(([name, value]) => [name, value.toFixed(2)]),
     deductions: data.categories
@@ -245,6 +363,15 @@ export function reportCSV(
       [],
       report.headers,
       ...report.rows,
+      ...(report.paymentHistory
+        ? [
+            [],
+            ['Linked invoice payments (all dates)'],
+            [report.paymentHistory.notes],
+            report.paymentHistory.headers,
+            ...report.paymentHistory.rows,
+          ]
+        : []),
       ...(report.deductions
         ? [[], ['Deductions by category', 'Amount (INR)'], ...report.deductions]
         : []),

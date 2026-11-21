@@ -29,25 +29,37 @@ export function formatDate(date: string) {
   });
 }
 export type DateRange = { from: string; to: string };
-export function FilterPanel({ children }: { children: React.ReactNode }) {
+export function FilterPanel({
+  children,
+  renderHeader,
+}: {
+  children: React.ReactNode;
+  renderHeader?: (toggle: React.ReactNode) => React.ReactNode;
+}) {
   const [open, setOpen] = useState(false);
   const id = useId();
+  const toggle = (
+    <button
+      type="button"
+      className="secondary filter-toggle"
+      aria-expanded={open}
+      aria-controls={id}
+      onClick={() => setOpen(!open)}
+    >
+      {open ? 'Hide filters' : 'Show filters'}{' '}
+      <ChevronDown size={16} style={{ transform: open ? 'rotate(180deg)' : undefined }} />
+    </button>
+  );
   return (
-    <div className="filter-panel">
-      <button
-        type="button"
-        className="secondary"
-        aria-expanded={open}
-        aria-controls={id}
-        onClick={() => setOpen(!open)}
-      >
-        {open ? 'Hide filters' : 'Show filters'}{' '}
-        <ChevronDown size={16} style={{ transform: open ? 'rotate(180deg)' : undefined }} />
-      </button>
-      <div id={id} hidden={!open}>
-        {children}
+    <>
+      {renderHeader?.(toggle)}
+      <div className="filter-panel">
+        {!renderHeader && toggle}
+        <div id={id} hidden={!open}>
+          {children}
+        </div>
       </div>
-    </div>
+    </>
   );
 }
 export function DateRangeFilter({

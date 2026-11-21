@@ -8,6 +8,7 @@ export function reportDocument(
     rows: (string | number)[][];
     notes: string;
     deductions?: string[][];
+    paymentHistory?: { headers: string[]; rows: string[][]; notes: string };
   },
 ): TDocumentDefinitions {
   return {
@@ -40,6 +41,27 @@ export function reportDocument(
       ...(report.rows.length
         ? []
         : [{ text: 'No records for the selected filters.', margin: [0, 12, 0, 0] } as Content]),
+      ...(report.paymentHistory
+        ? [
+            {
+              text: 'Linked invoice payments (all dates)',
+              bold: true,
+              margin: [0, 16, 0, 8],
+            } as Content,
+            { text: report.paymentHistory.notes, margin: [0, 0, 0, 8] } as Content,
+            {
+              table: {
+                headerRows: 1,
+                widths: ['*', '*', '*', '*', '*'],
+                body: [
+                  report.paymentHistory.headers.map((text) => ({ text, bold: true })),
+                  ...report.paymentHistory.rows,
+                ],
+              },
+              layout: 'lightHorizontalLines',
+            } as Content,
+          ]
+        : []),
       ...(report.deductions?.length
         ? [
             { text: 'Deductions by category (INR)', bold: true, margin: [0, 16, 0, 8] } as Content,

@@ -23,6 +23,23 @@ describe('invoice calculations', () => {
     expect(() => calculateInvoice({ ...invoice, igstPct: '18' })).toThrow();
     expect(() => validateInvoiceEdit({ ...invoice, receipts: '20609' })).toThrow();
   });
+  it('reconciles invoice amount and pending with adjustments, TDS and round-off', () => {
+    const result = calculateInvoice({ ...invoice, additions: ['100'], receipts: '5000' });
+    expect(result.gross.toFixed(2)).toBe('21077.10');
+    expect(result.net.toFixed(2)).toBe('20708.00');
+    expect(result.pending.toFixed(2)).toBe('15708.00');
+    expect(
+      result.taxable
+        .plus(result.cgst)
+        .plus(result.sgst)
+        .plus(result.igst)
+        .plus(result.additions)
+        .minus(result.deductions)
+        .plus(result.roundOff)
+        .equals(result.gross),
+    ).toBe(true);
+    expect(calculateInvoice({ ...invoice, receipts: '20609' }).pending.toFixed(2)).toBe('0.00');
+  });
   it('derives statuses from receipts', () => {
     expect(
       ['0', '1', '20608', '20609'].map(

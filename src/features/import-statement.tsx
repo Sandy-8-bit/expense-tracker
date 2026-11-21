@@ -84,10 +84,6 @@ export function ImportStatement({
     <>
       <section className="card">
         <h2>Import a bank statement</h2>
-        <p>
-          Upload CSV or XLSX from IDBI or ICICI. Original files are retained privately. Duplicate
-          transactions are skipped.
-        </p>
         {canWrite && (
           <button
             className="secondary"

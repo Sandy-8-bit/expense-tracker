@@ -259,11 +259,6 @@ export function ClassifyDialog({
                     Unassigned remainder:{' '}
                     {remainder === 'invalid' ? 'Enter valid amounts' : formatINR(remainder)}
                   </p>
-                  <p>
-                    Partial allocation is allowed. Any remainder stays unassigned for later
-                    classification. Enter amounts with at most two decimal places; extra decimals
-                    are rejected.
-                  </p>
                 </>
               ) : (
                 <div className="form-grid">
@@ -326,7 +321,7 @@ export function ClassifyDialog({
                         <p className="summary">
                           Invoice net: {formatINR(selected.net)} · Bank received:{' '}
                           {formatINR(selected.receipts)} · Existing expenses:{' '}
-                          {formatINR(selected.expenses)}. This debit counts once.
+                          {formatINR(selected.expenses)}.
                         </p>
                       ) : null;
                     })()}

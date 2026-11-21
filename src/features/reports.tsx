@@ -5,13 +5,16 @@ import { SupabaseClient } from '@supabase/supabase-js';
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { buildReport, reportCSV, ReportData, ReportRecord } from '../lib/reports';
-import { DateRangeFilter } from '../components/ui/finance';
+import { DateRangeFilter, formatDate } from '../components/ui/finance';
+import { ReportTable } from './report-table';
+import { Download, ChevronDown } from 'lucide-react';
 import { toast } from 'sonner';
 import { downloadBlob } from '../lib/download';
 export function Reports({ client, org }: { client: SupabaseClient; org: string }) {
   const today = new Date().toISOString().slice(0, 10);
-  const [type, setType] = useState('monthly');
+  const [type, setType] = useState('invoice');
   const [pdfBusy, setPDFBusy] = useState(false);
+  const [draftFilters, setDraftFilters] = useState({ company: '', category: '' });
   const [filters, setFilters] = useState({
     from: today.slice(0, 8) + '01',
     to: today,
@@ -77,6 +80,15 @@ export function Reports({ client, org }: { client: SupabaseClient; org: string }
       [],
       report.headers,
       ...report.rows,
+      ...(report.paymentHistory
+        ? [
+            [],
+            ['Linked invoice payments (all dates)'],
+            [report.paymentHistory.notes],
+            report.paymentHistory.headers,
+            ...report.paymentHistory.rows,
+          ]
+        : []),
       ...(report.deductions
         ? [[], ['Deductions by category', 'Amount (INR)'], ...report.deductions]
         : []),
@@ -99,76 +111,110 @@ export function Reports({ client, org }: { client: SupabaseClient; org: string }
     URL.revokeObjectURL(url);
   }
   return (
-    <section className="card">
+    <section className="card reports-page">
       <PageHeader>
         <h2>Financial reports</h2>
-        <div className="actions">
-          <button onClick={download} disabled={!report}>
-            Export filtered CSV
-          </button>
-          <button
-            className="secondary"
-            disabled={!report || pdfBusy}
-            onClick={async () => {
-              if (!report) return;
-              setPDFBusy(true);
-              try {
-                const { createReportPDF, reportDocument } = await import('../lib/report-pdf');
-                const company =
-                  data.data?.companies.find((c) => c.id === filters.company)?.name ??
-                  'All companies';
-                const category =
-                  data.data?.categories.find((c) => c.id === filters.category)?.name ??
-                  'All categories';
-                const blob = await createReportPDF(
-                  reportDocument(
-                    `${type} report`,
-                    `${filters.from} to ${filters.to} · ${company} · ${category} · Amounts in INR`,
-                    report,
-                  ),
-                );
-                downloadBlob(blob, `ClearLedger_${type}_${filters.from}_${filters.to}.pdf`);
-              } catch (error) {
-                toast.error(`PDF download failed: ${(error as Error).message}`);
-              } finally {
-                setPDFBusy(false);
+        <details className="report-export">
+          <summary>
+            <Download size={16} aria-hidden="true" /> Export{' '}
+            <ChevronDown size={14} aria-hidden="true" />
+          </summary>
+          <div className="report-export-menu">
+            <button onClick={download} disabled={!report}>
+              CSV file
+            </button>
+            <button
+              className="secondary"
+              disabled={!report || pdfBusy}
+              onClick={async () => {
+                if (!report) return;
+                setPDFBusy(true);
+                try {
+                  const { createReportPDF, reportDocument } = await import('../lib/report-pdf');
+                  const company =
+                    data.data?.companies.find((c) => c.id === filters.company)?.name ??
+                    'All companies';
+                  const category =
+                    data.data?.categories.find((c) => c.id === filters.category)?.name ??
+                    'All categories';
+                  const blob = await createReportPDF(
+                    reportDocument(
+                      `${type} report`,
+                      `${filters.from} to ${filters.to} · ${company} · ${category} · Amounts in INR`,
+                      report,
+                    ),
+                  );
+                  downloadBlob(blob, `ClearLedger_${type}_${filters.from}_${filters.to}.pdf`);
+                } catch (error) {
+                  toast.error(`PDF download failed: ${(error as Error).message}`);
+                } finally {
+                  setPDFBusy(false);
+                }
+              }}
+            >
+              {pdfBusy ? 'Generating PDF…' : 'PDF document'}
+            </button>
+            <button
+              className="secondary"
+              onClick={() => void downloadXLSX().catch((error) => toast.error(error.message))}
+              disabled={!report}
+            >
+              Excel workbook
+            </button>
+          </div>
+        </details>
+      </PageHeader>
+      <div className="report-controls">
+        <label>
+          Report
+          <Select
+            value={type}
+            onChange={(event) => {
+              setType(event.target.value);
+              if (event.target.value === 'company') {
+                setFilters((current) => ({ ...current, category: '' }));
+                setDraftFilters((current) => ({ ...current, category: '' }));
               }
             }}
           >
-            {pdfBusy ? 'Generating PDF…' : 'Download PDF'}
-          </button>
-          <button
-            className="secondary"
-            onClick={() => void downloadXLSX().catch((error) => toast.error(error.message))}
-            disabled={!report}
-          >
-            Export XLSX
-          </button>
+            <option value="invoice">Invoices</option>
+            <option value="monthly">Monthly summary</option>
+            <option value="payment">Payments</option>
+            <option value="company">Companies</option>
+            <option value="expense">Expenses</option>
+          </Select>
+        </label>
+        <div className="report-active-filters">
+          <span className="pill">
+            {formatDate(filters.from)} – {formatDate(filters.to)}
+          </span>
+          {filters.company && (
+            <span className="pill">
+              {String(
+                data.data?.companies.find((company) => company.id === filters.company)?.name ?? '',
+              )}
+            </span>
+          )}
+          {filters.category && type !== 'company' && (
+            <span className="pill">
+              {String(
+                data.data?.categories.find((category) => category.id === filters.category)?.name ??
+                  '',
+              )}
+            </span>
+          )}
         </div>
-      </PageHeader>
-      <div className="actions">
-        {[
-          ['monthly', 'Monthly summary'],
-          ['invoice', 'Invoice-wise'],
-          ['company', 'Company-wise'],
-          ['expense', 'Expense-wise'],
-        ].map(([value, name]) => (
-          <button
-            className={type === value ? '' : 'secondary'}
-            key={value}
-            onClick={() => setType(value)}
-          >
-            {name}
-          </button>
-        ))}
       </div>
-      <DateRangeFilter value={filters} onApply={(range) => setFilters({ ...filters, ...range })}>
+      <DateRangeFilter
+        value={filters}
+        onApply={(range) => setFilters({ ...range, ...draftFilters })}
+      >
         <div className="form-grid">
           <label>
             Company
             <Select
-              value={filters.company}
-              onChange={(e) => setFilters({ ...filters, company: e.target.value })}
+              value={draftFilters.company}
+              onChange={(e) => setDraftFilters({ ...draftFilters, company: e.target.value })}
             >
               <option value="">All companies</option>
               {data.data?.companies.map((c) => (
@@ -178,83 +224,43 @@ export function Reports({ client, org }: { client: SupabaseClient; org: string }
               ))}
             </Select>
           </label>
-          <label>
-            Expense category
-            <Select
-              value={filters.category}
-              onChange={(e) => setFilters({ ...filters, category: e.target.value })}
-            >
-              <option value="">All categories</option>
-              {data.data?.categories
-                .filter((c) => c.type === 'expense')
-                .map((c) => (
-                  <option value={String(c.id)} key={String(c.id)}>
-                    {String(c.name)}
-                  </option>
-                ))}
-            </Select>
-          </label>
+          {type !== 'company' && (
+            <label>
+              Expense category
+              <Select
+                value={draftFilters.category}
+                onChange={(e) => setDraftFilters({ ...draftFilters, category: e.target.value })}
+              >
+                <option value="">All categories</option>
+                {data.data?.categories
+                  .filter((c) => c.type === 'expense')
+                  .map((c) => (
+                    <option value={String(c.id)} key={String(c.id)}>
+                      {String(c.name)}
+                    </option>
+                  ))}
+              </Select>
+            </label>
+          )}
         </div>
       </DateRangeFilter>
       {data.isPending ? (
-        <p>Loading report…</p>
+        <p role="status">Loading report…</p>
       ) : data.error ? (
-        <p role="alert">{data.error.message}</p>
-      ) : (
-        report && (
-          <>
-            <p className="summary">
-              {type} report · {filters.from} to {filters.to} · Company:{' '}
-              {String(data.data?.companies.find((c) => c.id === filters.company)?.name ?? 'All')} ·
-              Category:{' '}
-              {String(data.data?.categories.find((c) => c.id === filters.category)?.name ?? 'All')}{' '}
-              · {report.rows.length} rows. {report.notes}
-            </p>
-            <div className="table-scroll">
-              <table>
-                <thead>
-                  <tr>
-                    {report.headers.map((h) => (
-                      <th key={h}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {report.rows.map((row, i) => (
-                    <tr key={i}>
-                      {row.map((v, j) => (
-                        <td key={j}>{v}</td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {!report.rows.length && <p className="empty">No records for the selected filters.</p>}
-            </div>
-            {report.deductions && (
-              <>
-                <h3>Deductions by category</h3>
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Category</th>
-                      <th>Amount (INR)</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {report.deductions.map(([name, amount]) => (
-                      <tr key={name}>
-                        <td>{name}</td>
-                        <td>{amount}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </>
-            )}
-          </>
-        )
-      )}
+        <div className="empty">
+          <p role="alert">{data.error.message}</p>
+          <button className="secondary" onClick={() => void data.refetch()}>
+            Try again
+          </button>
+        </div>
+      ) : report && data.data ? (
+        <ReportTable
+          key={`${type}-${filters.from}-${filters.to}-${filters.company}-${filters.category}`}
+          report={report}
+          data={data.data}
+          type={type}
+        />
+      ) : null}
     </section>
   );
 }

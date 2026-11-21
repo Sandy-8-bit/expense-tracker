@@ -104,9 +104,8 @@ const columns: Record<string, string[]> = {
     'company_id',
     'invoice_date',
     'gross',
-    'tds',
-    'net',
     'receipts',
+    'payment_dates',
     'pending',
     'expenses',
     'cash_remaining',
@@ -142,6 +141,7 @@ const moneyFields = new Set([
   'tds',
 ]);
 function label(value: string) {
+  if (value === 'gross') return 'Invoice Amount';
   return value.replaceAll('_', ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
 const queryClient = new QueryClient();
@@ -468,6 +468,45 @@ function Register({
         )
         .range(offset, offset + 24);
       if (error) throw error;
+      if (page === 'Invoices' && data.length) {
+        const payments: {
+          invoice_id: string;
+          amount: string;
+          bank_transactions: { txn_date: string };
+        }[] = [];
+        for (let paymentOffset = 0; ; paymentOffset += 500) {
+          const linked = await client
+            .from('receipt_allocations')
+            .select('invoice_id, amount, bank_transactions!inner(txn_date)')
+            .eq('organization_id', org)
+            .in(
+              'invoice_id',
+              data.map((invoice) => invoice.id),
+            )
+            .order('id')
+            .range(paymentOffset, paymentOffset + 499);
+          if (linked.error) throw linked.error;
+          payments.push(...(linked.data as unknown as typeof payments));
+          if (linked.data.length < 500) break;
+        }
+        return {
+          rows: data.map((invoice) => ({
+            ...invoice,
+            payment_dates:
+              payments
+                .filter((payment) => payment.invoice_id === invoice.id)
+                .sort((a, b) =>
+                  a.bank_transactions.txn_date.localeCompare(b.bank_transactions.txn_date),
+                )
+                .map(
+                  (payment) =>
+                    `${formatDate(payment.bank_transactions.txn_date)}: ${formatINR(payment.amount)}`,
+                )
+                .join('\n') || 'No linked payments',
+          })) as Row[],
+          count: count ?? 0,
+        };
+      }
       return { rows: data as Row[], count: count ?? 0 };
     },
   });
@@ -610,13 +649,6 @@ function Register({
       <PageHeader>
         <div>
           <h2>{page === 'Invoices' ? 'Invoice register' : page}</h2>
-          <p>
-            {page === 'Match Payments'
-              ? 'Manual classification only. No matching by company name or bank narration.'
-              : page === 'Invoices'
-                ? 'TDS is calculated on taxable value before GST.'
-                : ''}
-          </p>
         </div>
         {canWrite && inputFields && (
           <button onClick={newDraft}>+ Add {page === 'Invoices' ? 'invoice' : 'record'}</button>
@@ -643,11 +675,6 @@ function Register({
               </button>
             ))}
           </div>
-          {categoryType === 'expense' && (
-            <p>
-              Categories are shared by bank debits, manual expenses and invoice-linked expenses.
-            </p>
-          )}
         </div>
       )}
       <div className="filter-bar">
@@ -691,6 +718,8 @@ function Register({
                           }
                           signed={c === 'cash_remaining'}
                         />
+                      ) : c === 'payment_dates' ? (
+                        <span style={{ whiteSpace: 'pre-line' }}>{String(row[c])}</span>
                       ) : c === 'company_id' ? (
                         String(
                           choices.data?.companies.find((company) => company.id === row[c])?.name ??
@@ -1068,10 +1097,6 @@ function Register({
                         ))}
                       </tbody>
                     </table>
-                    <p>
-                      Round-off applies to the net bank receipt. TDS uses taxable value before GST.
-                      Verify tax treatment with your accountant.
-                    </p>
                     {draft?.id ? (
                       <button
                         type="button"

@@ -244,11 +244,6 @@ export function InvoiceDetails({
                 </tbody>
               </table>
               <h3>Invoice expenses</h3>
-              <p className="summary">
-                Total linked expenses: {formatINR(data.data!.invoice.expenses)}. Cash remaining =
-                bank receipts minus linked expenses. These expenses are separate from Other
-                Deductions and do not reduce the receivable.
-              </p>
               <h3>Spending by expense category</h3>
               <table>
                 <thead>

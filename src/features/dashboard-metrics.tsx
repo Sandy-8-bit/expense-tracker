@@ -198,10 +198,6 @@ export function DashboardMetrics({ client, org }: { client: SupabaseClient; org:
             </div>
           ))}
         </div>
-        <p>
-          Invoices issued in the selected period; receipts and expenses are cumulative across all
-          dates. Expenses do not reduce invoice receivables.
-        </p>
       </section>
       <section className="card">
         <h2>Five-month bank overview</h2>

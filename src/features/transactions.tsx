@@ -281,22 +281,27 @@ export function Transactions({
   return (
     <section className="card">
       {queue && <MatchMetrics client={client} org={org} />}
-      <PageHeader>
-        <div>
-          <h2>
-            {queue
-              ? 'Credits awaiting classification'
-              : debitsOnly
-                ? 'Bank expenses'
-                : 'Bank transactions'}
-          </h2>
-          <p>Manual classification only. No matching by name or narration.</p>
-        </div>
-        <span className="pill">
-          {data.data?.count ?? 0} matching · {ids.length} selected
-        </span>
-      </PageHeader>
-      <FilterPanel>
+      <FilterPanel
+        renderHeader={(toggle) => (
+          <PageHeader>
+            <div>
+              <h2>
+                {queue
+                  ? 'Credits awaiting classification'
+                  : debitsOnly
+                    ? 'Bank expenses'
+                    : 'Bank transactions'}
+              </h2>
+            </div>
+            <div className="actions">
+              <span className="pill">
+                {data.data?.count ?? 0} matching · {ids.length} selected
+              </span>
+              {toggle}
+            </div>
+          </PageHeader>
+        )}
+      >
         <div className="form-grid">
           <label>
             From
@@ -380,17 +385,17 @@ export function Transactions({
             </Select>
           </label>
         </div>
+        <label>
+          Search narration, ISO date or amount
+          <input
+            value={filters.search}
+            onChange={(e) => {
+              setPage(0);
+              setFilters({ ...filters, search: e.target.value });
+            }}
+          />
+        </label>
       </FilterPanel>
-      <label>
-        Search narration, ISO date or amount
-        <input
-          value={filters.search}
-          onChange={(e) => {
-            setPage(0);
-            setFilters({ ...filters, search: e.target.value });
-          }}
-        />
-      </label>
       <div className="actions">
         <button className="secondary" disabled={busy} onClick={() => void selectFiltered()}>
           Select filtered results
@@ -667,7 +672,7 @@ export function Transactions({
                       </table>
                       <p>
                         {plan.length} credits to link; {ids.length - plan.length} transactions
-                        skipped. Balances are rechecked atomically when you confirm.
+                        skipped.
                       </p>
                     </>
                   )}
